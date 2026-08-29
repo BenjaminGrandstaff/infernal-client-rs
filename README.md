@@ -38,13 +38,16 @@ HTTPS calls.
 
 ## Status
 
-The signing/verification core is implemented and unit-tested independently
-of the kernel, ported field-for-field from the kernel's own
-`service_requests.rs` so the wire format matches exactly. The kernel's
-governed HTTP routes still return `501` (ILK-002 Authority is not
-implemented), so there is no real governed operation to call end-to-end yet.
-Not yet built: retries, idempotency-key handling, and typed request/response
-schemas for specific kernel operations.
+The signing/verification core is implemented, unit-tested independently of
+the kernel, and proven wire-compatible: infernal-law depends on this crate
+as a dev-dependency and verifies, in its own test suite, that a request
+this crate signs is accepted by the kernel's real, unmodified
+`ServiceRequestVerifier` — including that a tampered body or an
+unregistered credential is correctly rejected. The kernel's governed HTTP
+routes still return `501` (ILK-002 Authority is not implemented), so there
+is no real governed operation to call end-to-end yet. Not yet built:
+retries, idempotency-key handling, and typed request/response schemas for
+specific kernel operations.
 
 ## Development
 
