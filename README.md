@@ -14,9 +14,20 @@ No caller links kernel code in-process; every language reaches the kernel
 only over that network contract
 ([ADR-0012](https://github.com/BenjaminGrandstaff/infernal-law/blob/main/docs/architecture/decisions/0012-rust-first-client-sdk-family-over-signed-rest.md)).
 
-`infernal-client-rs` implements that contract for Rust callers: request
-construction, Ed25519 signing, RFC 9421 signature-base construction,
-nonce/idempotency handling, retries, and typed request/response schemas.
+`infernal-client-rs` implements that contract for Rust callers:
+
+- `RequestParts` + `SignedRequest::sign` — request construction, Ed25519
+  signing, and RFC 9421 signature-base construction, ported directly from
+  the kernel's own `service_requests.rs` (the same logic the kernel's
+  verifier round-trips against in its own contract tests).
+- `KernelIdentity` — fetches and verifies against a kernel process's
+  self-published signing key
+  ([`GET /v1/kernel-identity`](https://github.com/BenjaminGrandstaff/infernal-law/blob/main/docs/architecture/decisions/0014-publish-kernel-identity-endpoint.md)),
+  so a caller can trust a kernel-signed message without static
+  configuration that breaks on every kernel restart.
+- `Client` — a blocking (no async runtime required) transport that sends a
+  `SignedRequest` and fetches a kernel's identity.
+
 Every other `infernal-client-*` SDK is checked for wire-level compatibility
 against this crate, not against each other.
 
@@ -27,10 +38,13 @@ HTTPS calls.
 
 ## Status
 
-Early scaffold. The kernel's governed HTTP routes are still pending (ILK-002
-Authority is not implemented), so there is no signed request/response
-contract to implement against yet. This crate currently only stores client
-configuration.
+The signing/verification core is implemented and unit-tested independently
+of the kernel, ported field-for-field from the kernel's own
+`service_requests.rs` so the wire format matches exactly. The kernel's
+governed HTTP routes still return `501` (ILK-002 Authority is not
+implemented), so there is no real governed operation to call end-to-end yet.
+Not yet built: retries, idempotency-key handling, and typed request/response
+schemas for specific kernel operations.
 
 ## Development
 
