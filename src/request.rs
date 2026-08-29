@@ -8,7 +8,7 @@ use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::credential::ClientCredential;
+use crate::credential::{ClientCredential, ClientPublicKey, SIGNATURE_LENGTH};
 use crate::error::ClientError;
 
 pub const SIGNATURE_LABEL: &str = "sig1";
@@ -110,6 +110,7 @@ pub struct SignedRequest {
 }
 
 impl SignedRequest {
+    /// Signs `parts` using a credential this crate generated and owns.
     pub fn sign(
         parts: RequestParts,
         credential: &ClientCredential,
@@ -117,8 +118,30 @@ impl SignedRequest {
         expires: i64,
         nonce: &str,
     ) -> Result<Self, ClientError> {
+        Self::sign_with(parts, credential.public_key(), created, expires, nonce, {
+            |message| credential.sign(message)
+        })
+    }
+
+    /// Signs `parts` using a keypair the caller already holds elsewhere —
+    /// for example a host process's own long-lived instance credential —
+    /// instead of a `ClientCredential` this crate generated. `signer` must
+    /// produce an Ed25519 signature over exactly the bytes it is given,
+    /// using the private key matching `public_key`.
+    ///
+    /// This is what lets a caller keep signing with the *same* key it
+    /// publishes elsewhere (for example at `GET /v1/kernel-identity`)
+    /// rather than a second, different key that a verifier would never
+    /// recognize.
+    pub fn sign_with(
+        parts: RequestParts,
+        public_key: &ClientPublicKey,
+        created: i64,
+        expires: i64,
+        nonce: &str,
+        signer: impl FnOnce(&[u8]) -> [u8; SIGNATURE_LENGTH],
+    ) -> Result<Self, ClientError> {
         validate_signature_metadata(created, expires, nonce)?;
-        let public_key = credential.public_key();
         let content_digest = content_digest(parts.body());
         let signature_parameters =
             signature_parameters(created, expires, nonce, public_key.key_id());
@@ -129,7 +152,7 @@ impl SignedRequest {
             &content_digest,
             &signature_parameters,
         );
-        let signature = credential.sign(base.as_bytes());
+        let signature = signer(base.as_bytes());
         Ok(Self {
             parts,
             service_id: public_key.service_id(),
@@ -346,5 +369,31 @@ mod tests {
         );
 
         assert_eq!(result, Err(ClientError::InvalidRequestPart("authority")));
+    }
+
+    #[test]
+    fn sign_with_an_externally_held_key_matches_sign_for_the_same_keypair() {
+        let credential = credential();
+        let nonce = generate_nonce().unwrap();
+        let shared_parts = parts();
+
+        let via_sign =
+            SignedRequest::sign(shared_parts.clone(), &credential, 1_000, 1_020, &nonce).unwrap();
+        let restored = ClientPublicKey::restore(
+            credential.public_key().service_id(),
+            credential.public_key().instance_id(),
+            credential.public_key().key_id(),
+            *credential.public_key().public_key_bytes(),
+        )
+        .unwrap();
+        let via_sign_with =
+            SignedRequest::sign_with(shared_parts, &restored, 1_000, 1_020, &nonce, |message| {
+                credential.sign(message)
+            })
+            .unwrap();
+
+        assert_eq!(via_sign.signature_input(), via_sign_with.signature_input());
+        assert_eq!(via_sign.signature(), via_sign_with.signature());
+        assert_eq!(via_sign.content_digest(), via_sign_with.content_digest());
     }
 }

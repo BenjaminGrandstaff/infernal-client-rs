@@ -26,6 +26,25 @@ pub struct ClientPublicKey {
 }
 
 impl ClientPublicKey {
+    /// Reconstructs a public key from raw parts — for a caller that already
+    /// holds a keypair minted elsewhere (for example a host process's own
+    /// long-lived instance credential) and wants to sign through this
+    /// crate's request-building without generating a second, different key.
+    pub fn restore(
+        service_id: Uuid,
+        instance_id: Uuid,
+        key_id: Uuid,
+        public_key: [u8; PUBLIC_KEY_LENGTH],
+    ) -> Result<Self, ClientError> {
+        VerifyingKey::from_bytes(&public_key).map_err(|_| ClientError::InvalidPublicKey)?;
+        Ok(Self {
+            service_id,
+            instance_id,
+            key_id,
+            public_key,
+        })
+    }
+
     pub const fn service_id(&self) -> Uuid {
         self.service_id
     }
