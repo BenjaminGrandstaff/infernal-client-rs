@@ -4,22 +4,17 @@
 //! per call.
 
 use base64::Engine;
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-use sha2::{Digest, Sha256};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use uuid::Uuid;
 
 use crate::credential::{ClientCredential, ClientPublicKey, SIGNATURE_LENGTH};
 use crate::error::ClientError;
-
-pub const SIGNATURE_LABEL: &str = "sig1";
-pub const SIGNATURE_VALIDITY_SECONDS: i64 = 30;
-pub const MIN_NONCE_LENGTH: usize = 16;
-pub const MAX_NONCE_LENGTH: usize = 128;
-
-const COVERED_COMPONENTS: &str = "(\"@method\" \"@target-uri\" \"content-digest\" \"content-type\" \"infernal-service-id\" \"infernal-instance-id\" \"infernal-request-id\")";
+use crate::wire::{self, SIGNATURE_LABEL};
 
 /// The caller-supplied, per-call parts of a signed request. Validated up
 /// front so a malformed call fails before any network activity or signing.
+/// Also used to represent an inbound request's parts for verification
+/// (`crate::verify`) — the same shape applies in both directions.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestParts {
     method: String,
@@ -42,7 +37,7 @@ impl RequestParts {
         if method.is_empty() || !method.bytes().all(|byte| byte.is_ascii_uppercase()) {
             return Err(ClientError::InvalidRequestPart("method"));
         }
-        if !valid_uri_value(authority)
+        if !wire::valid_uri_value(authority)
             || authority
                 .bytes()
                 .any(|byte| matches!(byte, b'/' | b'@' | b'?' | b'#'))
@@ -51,11 +46,11 @@ impl RequestParts {
         }
         if !path_and_query.starts_with('/')
             || path_and_query.contains('#')
-            || !valid_uri_value(path_and_query)
+            || !wire::valid_uri_value(path_and_query)
         {
             return Err(ClientError::InvalidRequestPart("path_and_query"));
         }
-        if !valid_header_value(content_type) {
+        if !wire::valid_header_value(content_type) {
             return Err(ClientError::InvalidRequestPart("content_type"));
         }
         Ok(Self {
@@ -141,15 +136,18 @@ impl SignedRequest {
         nonce: &str,
         signer: impl FnOnce(&[u8]) -> [u8; SIGNATURE_LENGTH],
     ) -> Result<Self, ClientError> {
-        validate_signature_metadata(created, expires, nonce)?;
-        let content_digest = content_digest(parts.body());
+        wire::validate_signature_metadata(created, expires, nonce)?;
+        let content_digest = wire::content_digest(parts.body());
         let signature_parameters =
-            signature_parameters(created, expires, nonce, public_key.key_id());
-        let base = signature_base(
-            &parts,
+            wire::signature_parameters(created, expires, nonce, public_key.key_id());
+        let base = wire::signature_base(
+            parts.method(),
+            &parts.target_uri(),
+            &content_digest,
+            parts.content_type(),
             public_key.service_id(),
             public_key.instance_id(),
-            &content_digest,
+            parts.request_id(),
             &signature_parameters,
         );
         let signature = signer(base.as_bytes());
@@ -159,7 +157,7 @@ impl SignedRequest {
             instance_id: public_key.instance_id(),
             content_digest,
             signature_input: format!("{SIGNATURE_LABEL}={signature_parameters}"),
-            signature: format!("{SIGNATURE_LABEL}=:{}:", STANDARD.encode(signature)),
+            signature: wire::encode_signature(&signature),
         })
     }
 
@@ -213,66 +211,10 @@ pub fn generate_nonce() -> Result<String, ClientError> {
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
-fn signature_parameters(created: i64, expires: i64, nonce: &str, key_id: Uuid) -> String {
-    format!(
-        "{COVERED_COMPONENTS};created={created};expires={expires};nonce=\"{nonce}\";keyid=\"{key_id}\";alg=\"ed25519\""
-    )
-}
-
-fn signature_base(
-    parts: &RequestParts,
-    service_id: Uuid,
-    instance_id: Uuid,
-    digest: &str,
-    parameters: &str,
-) -> String {
-    format!(
-        "\"@method\": {}\n\"@target-uri\": {}\n\"content-digest\": {}\n\"content-type\": {}\n\"infernal-service-id\": {}\n\"infernal-instance-id\": {}\n\"infernal-request-id\": {}\n\"@signature-params\": {}",
-        parts.method(),
-        parts.target_uri(),
-        digest,
-        parts.content_type(),
-        service_id,
-        instance_id,
-        parts.request_id(),
-        parameters,
-    )
-}
-
-fn content_digest(body: &[u8]) -> String {
-    format!("sha-256=:{}:", STANDARD.encode(Sha256::digest(body)))
-}
-
-fn validate_signature_metadata(created: i64, expires: i64, nonce: &str) -> Result<(), ClientError> {
-    if created < 0 {
-        return Err(ClientError::InvalidRequestPart("created"));
-    }
-    if expires <= created || expires - created > SIGNATURE_VALIDITY_SECONDS {
-        return Err(ClientError::InvalidRequestPart("expires"));
-    }
-    if !(MIN_NONCE_LENGTH..=MAX_NONCE_LENGTH).contains(&nonce.len())
-        || !nonce
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
-        return Err(ClientError::InvalidRequestPart("nonce"));
-    }
-    Ok(())
-}
-
-fn valid_header_value(value: &str) -> bool {
-    !value.is_empty()
-        && value.trim() == value
-        && value.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
-}
-
-fn valid_uri_value(value: &str) -> bool {
-    !value.is_empty() && value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wire::{MAX_NONCE_LENGTH, MIN_NONCE_LENGTH};
 
     fn credential() -> ClientCredential {
         ClientCredential::generate(Uuid::new_v4())

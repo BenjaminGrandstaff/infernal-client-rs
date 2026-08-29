@@ -25,6 +25,14 @@ only over that network contract
   ([`GET /v1/kernel-identity`](https://github.com/BenjaminGrandstaff/infernal-law/blob/main/docs/architecture/decisions/0014-publish-kernel-identity-endpoint.md)),
   so a caller can trust a kernel-signed message without static
   configuration that breaks on every kernel restart.
+- `IncomingRequest` + `verify_incoming` — the server-side counterpart to
+  signing: verifies an inbound request against a given public key (a
+  `KernelIdentity`, or any other registered service's key). This is what
+  lets a Rust service that *receives* kernel-originated signed calls (for
+  example a policy evaluator under
+  [ADR-0013](https://github.com/BenjaminGrandstaff/infernal-law/blob/main/docs/architecture/decisions/0013-external-stateless-policy-evaluator-for-authority.md))
+  authenticate them without a second, independent implementation of the
+  same protocol.
 - `Client` — a blocking (no async runtime required) transport that sends a
   `SignedRequest` and fetches a kernel's identity.
 
@@ -38,16 +46,20 @@ HTTPS calls.
 
 ## Status
 
-The signing/verification core is implemented, unit-tested independently of
-the kernel, and proven wire-compatible: infernal-law depends on this crate
-as a dev-dependency and verifies, in its own test suite, that a request
-this crate signs is accepted by the kernel's real, unmodified
-`ServiceRequestVerifier` — including that a tampered body or an
-unregistered credential is correctly rejected. The kernel's governed HTTP
-routes still return `501` (ILK-002 Authority is not implemented), so there
-is no real governed operation to call end-to-end yet. Not yet built:
-retries, idempotency-key handling, and typed request/response schemas for
-specific kernel operations.
+The signing/verification core is implemented and unit-tested independently
+of the kernel. infernal-law now depends on this crate at runtime, not only
+in its test suite: `HttpPolicyEvaluator` uses `sign_with` to sign the
+kernel's outbound calls to a policy evaluator with the kernel's own
+long-lived instance credential. infernal-law's own tests verify, against
+its real, unmodified `ServiceRequestVerifier`, that both a request this
+crate signs with a `ClientCredential` and a request the kernel signs with
+its own credential via `sign_with` are correctly accepted — and that a
+tampered body or an unregistered credential is correctly rejected. The
+kernel's governed HTTP routes still return `501` (ILK-002 Authority is not
+wired into the request-handling path yet), so there is no real governed
+operation to call end-to-end yet. Not yet built: retries, idempotency-key
+handling, and typed request/response schemas for specific kernel
+operations.
 
 ## Development
 

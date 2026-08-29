@@ -22,9 +22,12 @@ mod error;
 mod kernel_identity;
 mod request;
 mod transport;
+mod verify;
+mod wire;
 
 pub use credential::{ClientCredential, ClientPublicKey};
 pub use error::ClientError;
 pub use kernel_identity::KernelIdentity;
 pub use request::{RequestParts, SignedRequest, generate_nonce};
 pub use transport::{Client, SentResponse};
+pub use verify::{IncomingRequest, VerifiedRequest, verify_incoming};
