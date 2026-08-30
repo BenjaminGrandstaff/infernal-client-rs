@@ -20,6 +20,9 @@ pub enum ClientError {
     /// A `/v1/kernel-identity` response was missing, malformed, or did not
     /// parse as valid signing key material.
     MalformedKernelIdentity,
+    /// An extra trust anchor supplied to [`crate::Client::with_extra_root_certificate`]
+    /// was not a valid PEM-encoded certificate.
+    InvalidTrustAnchor,
 }
 
 impl Display for ClientError {
@@ -32,6 +35,9 @@ impl Display for ClientError {
             Self::Transport(message) => write!(formatter, "transport failed: {message}"),
             Self::MalformedKernelIdentity => {
                 formatter.write_str("kernel identity response is malformed")
+            }
+            Self::InvalidTrustAnchor => {
+                formatter.write_str("extra root certificate is not valid PEM")
             }
         }
     }
