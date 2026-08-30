@@ -55,11 +55,11 @@ its real, unmodified `ServiceRequestVerifier`, that both a request this
 crate signs with a `ClientCredential` and a request the kernel signs with
 its own credential via `sign_with` are correctly accepted — and that a
 tampered body or an unregistered credential is correctly rejected. The
-kernel's governed HTTP routes still return `501` (ILK-002 Authority is not
-wired into the request-handling path yet), so there is no real governed
-operation to call end-to-end yet. Not yet built: retries, idempotency-key
-handling, and typed request/response schemas for specific kernel
-operations.
+kernel's ILK-010 subscription routes now dispatch to real create/list/disable
+handlers rather than a placeholder response, though ILK-002 Authority
+evaluation is not yet called from that path. Not yet built: retries,
+idempotency-key handling, and typed request/response schemas for specific
+kernel operations.
 
 ## Development
 
