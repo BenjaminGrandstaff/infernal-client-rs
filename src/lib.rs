@@ -18,6 +18,7 @@
 //! crate only ever produces an ordinary authenticated network call.
 
 mod credential;
+mod enrollment;
 mod error;
 mod kernel_identity;
 mod request;
@@ -26,6 +27,9 @@ mod verify;
 mod wire;
 
 pub use credential::{ClientCredential, ClientPublicKey};
+pub use enrollment::{
+    CHALLENGE_LENGTH, EnrolledInstance, EnrollmentRejection, EnrollmentSubmission,
+};
 pub use error::ClientError;
 pub use kernel_identity::KernelIdentity;
 pub use request::{RequestParts, SignedRequest, generate_nonce};

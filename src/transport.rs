@@ -6,6 +6,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
+use crate::enrollment::{EnrolledInstance, EnrollmentRejection, EnrollmentSubmission};
 use crate::error::ClientError;
 use crate::kernel_identity::KernelIdentity;
 use crate::request::SignedRequest;
@@ -98,6 +99,36 @@ impl Client {
             .text()
             .map_err(|error| ClientError::Transport(error.to_string()))?;
         KernelIdentity::from_json(&body)
+    }
+
+    /// Submits a signed ADR-0008 enrollment proof to
+    /// `POST {base_url}/v1/enrollments`. Unlike [`Client::send`], this call
+    /// is not itself request-signed (ADR-0003 signing requires an already-
+    /// registered instance, which is exactly what enrollment is
+    /// bootstrapping); the proof embedded in `submission`'s body is what
+    /// the kernel authenticates instead.
+    pub fn submit_enrollment(
+        &self,
+        base_url: &str,
+        submission: &EnrollmentSubmission,
+    ) -> Result<EnrolledInstance, ClientError> {
+        let response = self
+            .http
+            .post(format!("{base_url}/v1/enrollments"))
+            .json(submission)
+            .send()
+            .map_err(|error| ClientError::Transport(error.to_string()))?;
+        let status = response.status();
+        let body = response
+            .bytes()
+            .map_err(|error| ClientError::Transport(error.to_string()))?;
+        if status.is_success() {
+            return serde_json::from_slice(&body)
+                .map_err(|_| ClientError::MalformedEnrollmentResponse);
+        }
+        let rejection: EnrollmentRejection =
+            serde_json::from_slice(&body).map_err(|_| ClientError::MalformedEnrollmentResponse)?;
+        Err(ClientError::EnrollmentRejected(rejection))
     }
 }
 

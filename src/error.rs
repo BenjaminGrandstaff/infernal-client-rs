@@ -23,6 +23,12 @@ pub enum ClientError {
     /// An extra trust anchor supplied to [`crate::Client::with_extra_root_certificate`]
     /// was not a valid PEM-encoded certificate.
     InvalidTrustAnchor,
+    /// The kernel rejected an enrollment submission -- its own sanitized
+    /// code and message, safe to surface as-is.
+    EnrollmentRejected(crate::EnrollmentRejection),
+    /// A `POST /v1/enrollments` response was not valid JSON in either the
+    /// success or the error shape.
+    MalformedEnrollmentResponse,
 }
 
 impl Display for ClientError {
@@ -38,6 +44,12 @@ impl Display for ClientError {
             }
             Self::InvalidTrustAnchor => {
                 formatter.write_str("extra root certificate is not valid PEM")
+            }
+            Self::EnrollmentRejected(rejection) => {
+                write!(formatter, "enrollment rejected: {}", rejection.message)
+            }
+            Self::MalformedEnrollmentResponse => {
+                formatter.write_str("enrollment response is malformed")
             }
         }
     }
