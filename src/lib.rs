@@ -28,7 +28,8 @@ mod wire;
 
 pub use credential::{ClientCredential, ClientPublicKey};
 pub use enrollment::{
-    CHALLENGE_LENGTH, EnrolledInstance, EnrollmentRejection, EnrollmentSubmission,
+    CHALLENGE_LENGTH, ChallengeRequest, EnrolledInstance, EnrollmentRejection,
+    EnrollmentSubmission, IssuedChallenge,
 };
 pub use error::ClientError;
 pub use kernel_identity::KernelIdentity;

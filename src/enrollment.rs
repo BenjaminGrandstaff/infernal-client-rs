@@ -15,6 +15,7 @@
 //! message layout, JSON body shape) rather than sharing an implementation
 //! -- wire compatibility is proven by a cross-crate test in infernal-law's
 //! own repository, the same way ADR-0003 signing compatibility is.
+use std::fmt;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -106,6 +107,51 @@ pub struct EnrolledInstance {
     pub registered_at: i64,
     pub lease_expires_at: i64,
     pub lease_revision: i64,
+}
+
+/// Requests a challenge from the kernel on the workload's own behalf
+/// (`POST /v1/enrollments/challenges`). Deliberately carries no service
+/// ID: the kernel derives that from the enrollment binding this token
+/// resolves to, so a workload cannot request a challenge for an identity
+/// it may not become.
+#[derive(Clone, Serialize)]
+pub struct ChallengeRequest {
+    pub pod_uid: String,
+    pub workload_token: String,
+}
+
+/// Debug is written by hand: this type carries a bearer token, and the
+/// derived form would print it.
+impl fmt::Debug for ChallengeRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ChallengeRequest")
+            .field("pod_uid", &self.pod_uid)
+            .field("workload_token", &"<redacted>")
+            .finish()
+    }
+}
+
+/// The kernel's `EnrollmentChallengeResponse`. `challenge` is base64url
+/// (no padding) over exactly [`CHALLENGE_LENGTH`] bytes.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct IssuedChallenge {
+    pub service_id: String,
+    pub challenge: String,
+    pub audience: String,
+    pub expires_at: i64,
+}
+
+impl IssuedChallenge {
+    /// Decodes the wire form into the raw value [`EnrollmentSubmission::sign`]
+    /// expects.
+    pub fn challenge_bytes(&self) -> Result<[u8; CHALLENGE_LENGTH], ClientError> {
+        URL_SAFE_NO_PAD
+            .decode(&self.challenge)
+            .map_err(|_| ClientError::MalformedEnrollmentResponse)?
+            .try_into()
+            .map_err(|_| ClientError::MalformedEnrollmentResponse)
+    }
 }
 
 /// The kernel's own sanitized enrollment error shape

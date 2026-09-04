@@ -6,7 +6,9 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
-use crate::enrollment::{EnrolledInstance, EnrollmentRejection, EnrollmentSubmission};
+use crate::enrollment::{
+    ChallengeRequest, EnrolledInstance, EnrollmentRejection, EnrollmentSubmission, IssuedChallenge,
+};
 use crate::error::ClientError;
 use crate::kernel_identity::KernelIdentity;
 use crate::request::SignedRequest;
@@ -99,6 +101,46 @@ impl Client {
             .text()
             .map_err(|error| ClientError::Transport(error.to_string()))?;
         KernelIdentity::from_json(&body)
+    }
+
+    /// Asks the kernel to issue this workload an enrollment challenge
+    /// (`POST {base_url}/v1/enrollments/challenges`). Like
+    /// [`Client::submit_enrollment`] this call is not request-signed --
+    /// it runs before any registered instance exists. The kernel
+    /// authenticates the projected ServiceAccount token instead, and
+    /// derives the service ID from the enrollment binding rather than
+    /// trusting anything in this request.
+    ///
+    /// This is what lets a restarted or newly scaled Pod enroll without an
+    /// operator: a challenge is single-use, so a value injected through
+    /// the environment survives exactly one Pod lifetime.
+    pub fn request_enrollment_challenge(
+        &self,
+        base_url: &str,
+        pod_uid: &str,
+        workload_token: &str,
+    ) -> Result<IssuedChallenge, ClientError> {
+        let body = ChallengeRequest {
+            pod_uid: pod_uid.trim().to_owned(),
+            workload_token: workload_token.to_owned(),
+        };
+        let response = self
+            .http
+            .post(format!("{base_url}/v1/enrollments/challenges"))
+            .json(&body)
+            .send()
+            .map_err(|error| ClientError::Transport(error.to_string()))?;
+        let status = response.status();
+        let payload = response
+            .bytes()
+            .map_err(|error| ClientError::Transport(error.to_string()))?;
+        if status.is_success() {
+            return serde_json::from_slice(&payload)
+                .map_err(|_| ClientError::MalformedEnrollmentResponse);
+        }
+        let rejection: EnrollmentRejection = serde_json::from_slice(&payload)
+            .map_err(|_| ClientError::MalformedEnrollmentResponse)?;
+        Err(ClientError::EnrollmentRejected(rejection))
     }
 
     /// Submits a signed ADR-0008 enrollment proof to
